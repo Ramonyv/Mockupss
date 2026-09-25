@@ -1,0 +1,10 @@
+export type Point = [number,number];
+export type Corners = {topLeft:Point;topRight:Point;bottomRight:Point;bottomLeft:Point};
+export type Perspective = {tl:Point;tr:Point;br:Point;bl:Point};
+export type Screen = {id:string;label:string;type:'quad'|'rounded'|'mask';corners:Corners;perspective?:Perspective;perspectiveStatus?:'auto'|'needs-adjustment'|'manual';visibleBounds?:[number,number,number,number];visibleArea?:number;fit:'cover'|'contain';safeArea?:number;screenBleed?:number;cornerRadius?:number;mask?:string|Blob;outline?:string|Blob;labelPoint?:Point;geometryVersion?:number};
+export type Template = {id:string;name:string;category:string;version:number;masterImage:string|Blob;thumbnail:string|Blob;width:number;height:number;screens:Screen[];foregroundLayer?:string|Blob;tags:string[];featured?:boolean;createdDate:string;orientation:string;style:string;device:string;custom?:boolean;transparent?:boolean;status?:'draft'|'published'};
+export type Transform = {fit:'cover'|'contain';scale:number;x:number;y:number;rotation:number};
+export type ScreenAsset = {id:string;blob:Blob;name:string;width:number;height:number;created:number};
+export type Assignment = {assetId:string;transform:Transform};
+export type Project = {templateId:string;assignments:Record<string,Assignment>;selectedScreen:string|null;updated:number};
+export const defaultTransform=():Transform=>({fit:'cover',scale:1,x:0,y:0,rotation:0});
