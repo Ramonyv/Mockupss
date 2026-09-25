@@ -1,17 +1,19 @@
 import type {Assignment,Point,Screen,ScreenAsset,Template} from '../types';
 import {validatePerspective} from './perspective';
+import {repairGreenFringe} from './greenFringe';
 
 export type RenderOptions={template:Template;assets:Record<string,ScreenAsset>;assignments:Record<string,Assignment>;outputWidth:number;outputHeight:number;background?:string;original?:boolean;allowUncertainPerspective?:boolean;onProgress?:(n:number)=>void};
 
 const vertex=`attribute vec2 position;void main(){gl_Position=vec4(position,0.,1.);}`;
 const fragment=`precision highp float;
 uniform sampler2D photo;uniform vec3 hu,hv,hd;uniform vec2 tileOrigin,tileSize;
-uniform vec2 cropSize,offset;uniform float rotation,rounded;
+uniform vec2 cropSize,offset;uniform float rotation,rounded,masked;
 void main(){
   vec2 p=vec2(tileOrigin.x+gl_FragCoord.x,tileOrigin.y+tileSize.y-gl_FragCoord.y);
   float w=dot(hd,vec3(p,1.));
   vec2 q=vec2(dot(hu,vec3(p,1.)),dot(hv,vec3(p,1.)))/w;
-  if(q.x<0.||q.y<0.||q.x>1.||q.y>1.) discard;
+  if(masked<.5&&(q.x<0.||q.y<0.||q.x>1.||q.y>1.)) discard;
+  q=clamp(q,0.,1.);
   if(rounded>0.){vec2 d=max(abs(q-.5)-vec2(.5-rounded),0.);if(length(d)>rounded)discard;}
   vec2 uv=(q-.5)*cropSize;
   float c=cos(rotation),s=sin(rotation);
@@ -53,9 +55,22 @@ export async function renderMockup({template,assets,assignments,outputWidth,outp
       const img=await bitmap(asset.blob),tex=texture(gl,img);const points=perspectivePoints(screen,outputWidth,outputHeight,template.width),h=homography(points);vec3('hu',h.u);vec3('hv',h.v);vec3('hd',h.d);
       const top=Math.hypot(points[1][0]-points[0][0],points[1][1]-points[0][1]);const bottom=Math.hypot(points[2][0]-points[3][0],points[2][1]-points[3][1]);const left=Math.hypot(points[3][0]-points[0][0],points[3][1]-points[0][1]);const right=Math.hypot(points[2][0]-points[1][0],points[2][1]-points[1][1]);const targetAspect=((top+bottom)/2)/((left+right)/2);const srcAspect=img.width/img.height;const fit=assignment.transform.fit;let cw=1,ch=1;if(fit==='cover'){if(srcAspect>targetAspect)cw=targetAspect/srcAspect;else ch=srcAspect/targetAspect;}else{if(srcAspect>targetAspect)ch=targetAspect/srcAspect;else cw=srcAspect/targetAspect;cw=1/cw;ch=1/ch;}
       const scale=assignment.transform.scale||1;vec2('cropSize',[cw/scale,ch/scale]);vec2('offset',[assignment.transform.x*(1-cw/scale)*.5,assignment.transform.y*(1-ch/scale)*.5]);number('rotation',assignment.transform.rotation*Math.PI/180);number('rounded',screen.type==='rounded'?(screen.cornerRadius??.04):0);
+      number('masked',screen.mask?1:0);
       const layer=screen.mask?context(outputWidth,outputHeight):null;const target=layer?.ctx??ctx;
       for(let y=0;y<outputHeight;y+=tileLimit)for(let x=0;x<outputWidth;x+=tileLimit){const tw=Math.min(tileLimit,outputWidth-x),th=Math.min(tileLimit,outputHeight-y);glCanvas.width=tw;glCanvas.height=th;gl.viewport(0,0,tw,th);gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);vec2('tileOrigin',[x,y]);vec2('tileSize',[tw,th]);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);target.drawImage(glCanvas,x,y);}
-      if(screen.mask&&layer){const mask=await bitmap(screen.mask);layer.ctx.globalCompositeOperation='destination-in';layer.ctx.drawImage(mask,0,0,outputWidth,outputHeight);layer.ctx.globalCompositeOperation='source-over';mask.close();ctx.drawImage(layer.canvas,0,0);}
+      if(screen.mask&&layer){
+        const mask=await bitmap(screen.mask),matte=context(outputWidth,outputHeight);
+        matte.ctx.drawImage(mask,0,0,outputWidth,outputHeight);mask.close();
+        const pad=Math.max(2,Math.min(12,Math.ceil(4*outputWidth/template.width)));
+        const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+        const bx=Math.max(0,Math.floor(Math.min(...xs)-pad-2)),by=Math.max(0,Math.floor(Math.min(...ys)-pad-2));
+        const bw=Math.min(outputWidth-bx,Math.ceil(Math.max(...xs)+pad+2)-bx),bh=Math.min(outputHeight-by,Math.ceil(Math.max(...ys)+pad+2)-by);
+        const projection=bw>0&&bh>0?layer.ctx.getImageData(bx,by,bw,bh):null;
+        const maskPixels=projection?matte.ctx.getImageData(bx,by,bw,bh):null;
+        layer.ctx.globalCompositeOperation='destination-in';layer.ctx.drawImage(matte.canvas,0,0);layer.ctx.globalCompositeOperation='source-over';
+        ctx.drawImage(layer.canvas,0,0);
+        if(projection&&maskPixels){const output=ctx.getImageData(bx,by,bw,bh);if(repairGreenFringe(output.data,projection.data,maskPixels.data,bw,bh,pad))ctx.putImageData(output,bx,by);}
+      }
       gl.deleteTexture(tex);img.close();onProgress?.(.12+.72*(si+1)/template.screens.length);await new Promise(r=>setTimeout(r,0));
     }
   }finally{gl.deleteBuffer(buffer);gl.deleteShader(vs);gl.deleteShader(fs);gl.deleteProgram(program);gl.getExtension('WEBGL_lose_context')?.loseContext();}
