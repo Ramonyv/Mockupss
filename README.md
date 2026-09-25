@@ -2,6 +2,8 @@
 
 A local-first mockup editor built with React, TypeScript, Vite, WebGL, Canvas, and IndexedDB.
 
+The interface uses the locally bundled Google Sans variable font in light and dark themes. Its SIL Open Font License is included at `src/assets/fonts/OFL.txt`.
+
 ## Run
 
 ```sh
