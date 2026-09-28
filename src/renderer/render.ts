@@ -34,7 +34,7 @@ function compile(gl:WebGLRenderingContext,type:number,source:string){const s=gl.
 async function bitmap(src:string|Blob){const blob=typeof src==='string'?await (await fetch(src)).blob():src;return createImageBitmap(blob,{imageOrientation:'from-image'});}
 function context(w:number,h:number){const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:true});if(!ctx)throw Error('Canvas is unavailable.');return {canvas,ctx};}
 function texture(gl:WebGLRenderingContext,img:ImageBitmap){
-  const t=gl.createTexture()!;gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  const t=gl.createTexture()!;gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
   const prepared=context(img.width,img.height);prepared.ctx.drawImage(img,0,0);
   const content=prepared.ctx.getImageData(0,0,img.width,img.height);
   if(makeScreenshotOpaque(content.data,img.width,img.height)){prepared.ctx.putImageData(content,0,0);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,prepared.canvas);}
