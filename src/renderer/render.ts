@@ -1,6 +1,7 @@
 import type {Assignment,Point,Screen,ScreenAsset,Template} from '../types';
 import {validatePerspective} from './perspective';
 import {repairGreenFringe} from './greenFringe';
+import {makeScreenshotOpaque} from './opaqueScreenshot';
 
 export type RenderOptions={template:Template;assets:Record<string,ScreenAsset>;assignments:Record<string,Assignment>;outputWidth:number;outputHeight:number;background?:string;original?:boolean;allowUncertainPerspective?:boolean;onProgress?:(n:number)=>void};
 
@@ -32,7 +33,14 @@ export function perspectivePoints(screen:Screen,width:number,height:number,refer
 function compile(gl:WebGLRenderingContext,type:number,source:string){const s=gl.createShader(type)!;gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s)||'Shader failed');return s;}
 async function bitmap(src:string|Blob){const blob=typeof src==='string'?await (await fetch(src)).blob():src;return createImageBitmap(blob,{imageOrientation:'from-image'});}
 function context(w:number,h:number){const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:true});if(!ctx)throw Error('Canvas is unavailable.');return {canvas,ctx};}
-function texture(gl:WebGLRenderingContext,img:ImageBitmap){const t=gl.createTexture()!;gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);return t;}
+function texture(gl:WebGLRenderingContext,img:ImageBitmap){
+  const t=gl.createTexture()!;gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  const prepared=context(img.width,img.height);prepared.ctx.drawImage(img,0,0);
+  const content=prepared.ctx.getImageData(0,0,img.width,img.height);
+  if(makeScreenshotOpaque(content.data,img.width,img.height)){prepared.ctx.putImageData(content,0,0);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,prepared.canvas);}
+  else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+  return t;
+}
 
 
 export async function renderMockup({template,assets,assignments,outputWidth,outputHeight,background,original,allowUncertainPerspective,onProgress}:RenderOptions):Promise<HTMLCanvasElement>{

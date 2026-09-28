@@ -1,5 +1,6 @@
 import type {Corners,Point,Screen} from '../types';
 import {validateScreen} from '../renderer/render';
+import {calibrateMarkers,markerCoverPixels} from './markers';
 
 type Region={pixels:Int32Array;corners:Corners;area:number;bounds:[number,number,number,number]};
 type RawRegion={pixels:Int32Array;area:number;minX:number;minY:number;maxX:number;maxY:number};
@@ -89,16 +90,21 @@ const canvasBlob=(canvas:HTMLCanvasElement)=>new Promise<Blob>((resolve,reject)=
 export async function detectGreenScreens(master:Blob,tolerance=24):Promise<Screen[]>{
   const image=await createImageBitmap(master,{imageOrientation:'from-image'});const scale=Math.min(1,2600/Math.max(image.width,image.height));const w=Math.max(1,Math.round(image.width*scale)),h=Math.max(1,Math.round(image.height*scale));
   const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx){image.close();throw Error('Canvas is unavailable for detection.');}ctx.drawImage(image,0,0,w,h);image.close();
-  const pixels=ctx.getImageData(0,0,w,h);const regions=analyzeChroma(pixels.data,w,h,tolerance);const screens:Screen[]=[];
+  const pixels=ctx.getImageData(0,0,w,h);const regions=analyzeChroma(pixels.data,w,h,tolerance),calibrations=calibrateMarkers(pixels.data,w,h,regions);const screens:Screen[]=[];
   for(let i=0;i<regions.length;i++){
     const region=regions[i],mask=document.createElement('canvas'),outline=document.createElement('canvas');mask.width=w;mask.height=h;outline.width=w;outline.height=h;const mctx=mask.getContext('2d')!,octx=outline.getContext('2d')!,alpha=mctx.createImageData(w,h),edge=octx.createImageData(w,h),flags=new Uint8Array(w*h);let cx=0,cy=0;
-    for(const p of region.pixels){flags[p]=1;cx+=p%w;cy+=Math.floor(p/w);const j=p*4;alpha.data[j]=255;alpha.data[j+1]=255;alpha.data[j+2]=255;alpha.data[j+3]=255;}
+    const cover=(p:number)=>{flags[p]=1;const j=p*4;alpha.data[j]=255;alpha.data[j+1]=255;alpha.data[j+2]=255;alpha.data[j+3]=255;};
+    for(const p of region.pixels){cover(p);cx+=p%w;cy+=Math.floor(p/w);}
+    // Marker cores and their antialiased rims belong to the replaceable screen.
+    for(const p of markerCoverPixels(calibrations[i].markerPixels,w,h))cover(p);
     const outside=new Uint8Array(w*h),queue=new Int32Array(w*h);let head=0,tail=0;const seed=(p:number)=>{if(!flags[p]&&!outside[p]){outside[p]=1;queue[tail++]=p;}};
     for(let x=0;x<w;x++){seed(x);seed((h-1)*w+x);}for(let y=1;y<h-1;y++){seed(y*w);seed(y*w+w-1);}
     while(head<tail){const p=queue[head++];neighbors(p,w,h,q=>{if(!flags[q]&&!outside[q]){outside[q]=1;queue[tail++]=q;}});}
     for(const p of region.pixels){const x=p%w,y=Math.floor(p/w);if(x>0&&x<w-1&&y>0&&y<h-1&&!outside[p-1]&&!outside[p+1]&&!outside[p-w]&&!outside[p+w])continue;const j=p*4;edge.data[j]=239;edge.data[j+1]=255;edge.data[j+2]=234;edge.data[j+3]=210;}
     mctx.putImageData(alpha,0,0);octx.putImageData(edge,0,0);
-    screens.push({id:crypto.randomUUID(),label:`Screen ${i+1}`,type:'mask',corners:region.corners,fit:'cover',screenBleed:0,mask:await canvasBlob(mask),outline:await canvasBlob(outline),labelPoint:[cx/region.pixels.length/w,cy/region.pixels.length/h],geometryVersion:2});
+    const calibration=calibrations[i];
+    const p=calibration.perspective,corners=p?{topLeft:p.tl,topRight:p.tr,bottomRight:p.br,bottomLeft:p.bl}:region.corners;
+    screens.push({id:crypto.randomUUID(),label:`Screen ${i+1}`,type:'mask',corners,perspective:p,perspectiveStatus:p?'marker':undefined,visibleBounds:p?[region.bounds[0]/w,region.bounds[1]/h,region.bounds[2]/w,region.bounds[3]/h]:undefined,visibleArea:p?region.area/(w*h):undefined,fit:'cover',screenBleed:0,mask:await canvasBlob(mask),outline:await canvasBlob(outline),labelPoint:[cx/region.pixels.length/w,cy/region.pixels.length/h],geometryVersion:p?3:2});
   }
   return screens;
 }
